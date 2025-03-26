@@ -40,19 +40,36 @@ def get_masked_flow(mask: np.ndarray,
     
     return flow * mask[..., None]
     
-        
+
 if __name__ == '__main__':
-    # Example usage
+    # Example usage, click around to see the flow change
     import cv2
     from gui.colorwheel import flow_to_image
-    mask = np.zeros((512, 512))
-    center = (100,100)
-    mask = cv2.circle(mask, center, 60, 1, thickness=-1)
+
+    def mouse_callback(event, x, y, flags, param):
+        global target_point, flow, flow_im
+        if event == cv2.EVENT_LBUTTONDOWN:
+            target_point = (x, y)
+            flow = get_masked_flow(mask, target_point, mode='translate')
+            flow_im = flow_to_image(flow, convert_to_bgr=True)
     
-    target_point = (300,300)
+    # Circle mask
+    mask = np.zeros((512, 512))
+    center = (256, 256)
+    mask = cv2.circle(mask, center, 60, 1, thickness=-1)
+
+    # Initial flow
+    target_point = (300, 300)
     flow = get_masked_flow(mask, target_point, mode='translate')
     flow_im = flow_to_image(flow, convert_to_bgr=True)
-    
-    cv2.imshow('Flow', flow_im)
-    cv2.waitKey(0)
-    
+
+    cv2.namedWindow('Flow')
+    cv2.setMouseCallback('Flow', mouse_callback)
+
+    while True:
+        cv2.imshow('Flow', flow_im)
+        if cv2.waitKey(1) & 0xFF == 27:  # Press 'Esc' to exit
+            break
+
+    cv2.destroyAllWindows()
+
