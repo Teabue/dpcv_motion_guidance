@@ -150,8 +150,7 @@ if __name__ == '__main__':
     
     img2 = cv2.imread('./assets/moved.png')
     img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2RGB, img2)
-    mask2, best_iou = automatic_mask(img2, mask, target_point, iou_threshold=0.4)
-    print(f"Best IoU: {best_iou}")
+    mask2 = automatic_mask(img2, mask, target_point, iou_threshold=0.4)
     
     masked_img2 = mask2[..., None]*img2
     masked_img2 = cv2.circle(masked_img2, (int(target_point[0]), int(target_point[1])), 10, (0,255,0), -1)
