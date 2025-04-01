@@ -103,7 +103,7 @@ def automatic_mask(img: np.ndarray,
     best_mask = None
 
     for mask in masks:
-        iou = compute_iou(prev_mask, mask, mode)
+        iou = compute_iou(prev_mask, mask, mode, plot=True)
         if iou > best_iou:
             best_iou = iou
             best_mask = mask
@@ -119,6 +119,7 @@ if __name__ == '__main__':
     
     import cv2
     import matplotlib.pyplot as plt
+    
     prompt_point = np.array([[325,240]])
     img1 = cv2.imread('./assets/orig.png')
     img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2RGB, img1) 
@@ -155,5 +156,5 @@ if __name__ == '__main__':
     masked_img2 = mask2[..., None]*img2
     masked_img2 = cv2.circle(masked_img2, (int(target_point[0]), int(target_point[1])), 10, (0,255,0), -1)
     plt.imshow(masked_img2)
-    plt.title('Masked moved image and center mass displayed')
+    plt.title('Masked moved image and target point displayed')
     plt.show()
