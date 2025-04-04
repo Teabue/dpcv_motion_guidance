@@ -116,10 +116,11 @@ def make_scribble_to_frames(scribble: np.ndarray, sam_center: np.ndarray, frames
                                               sam_center=sam_center)
     sorted_distances = get_sorted_coordinates(masked_distances=distance)
     
-    # Space the coordinates into N points
-    step = len(sorted_distances) // frames # NOTE: Should we assume that the original image is frame 1?
-    spaced_coords = sorted_distances[step::step] # Don't start from the first point as it's the center
-    spaced_coords = np.array(spaced_coords)
+    # Keep the end point fixed and space the coordinates into N points
+    spaced_coords = np.empty((frames, 2))
+    spaced_coords[-1] = sorted_distances[-1]
+    steps = np.linspace(0, len(sorted_distances), frames - 1, dtype=int, endpoint=False)
+    spaced_coords[:-1] = sorted_distances[steps]
     
     # Skeletonize the mask
     mask_skeleton = skeletonize(scribble) 
@@ -127,6 +128,7 @@ def make_scribble_to_frames(scribble: np.ndarray, sam_center: np.ndarray, frames
     # Fit the points to the skeleton
     points = fit_points_to_skeleton(skeleton=mask_skeleton, 
                                     points=spaced_coords)
+    points[0] = sam_center # Make sure the first point is the center of the mask
     
     return points
 
@@ -270,22 +272,19 @@ with gr.Blocks() as demo:
                                                frames = frames)
         
         if motion_state == "Translate":
-            
-            start_point = mask_center
             arrow_color = (0, 255, 0)
             arrow_width = 5
             image = image['background']
-            for point in frame_points:
+            for start_point, end_point in zip(frame_points[:-1], frame_points[1:]):
                 # Draw a line from the start point to the clicked point
                 arrow_color = (0, 255, 0)
                 arrow_width = 5
                 image = cv2.arrowedLine(img = image,
                                         pt1 = tuple(start_point), 
-                                        pt2 = tuple(point),
+                                        pt2 = tuple(end_point),
                                         color = arrow_color, 
                                         thickness=arrow_width, 
                                         )
-                start_point = point
             
             return image
             
