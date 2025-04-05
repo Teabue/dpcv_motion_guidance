@@ -3,12 +3,14 @@ import torch
 import cv2
 from segment_anything import sam_model_registry, SamPredictor
 
+
 def get_bounding_box(mask):
     """Get Bbox of non-zero region"""
     y_coords, x_coords = np.where(mask > 0)
     if len(y_coords) == 0:  # Empty mask
         return None
     return (min(y_coords), max(y_coords), min(x_coords), max(x_coords))
+
 
 def letterbox_resize(mask, target_shape):
     """
@@ -44,6 +46,7 @@ def letterbox_resize(mask, target_shape):
     
     return padded_mask
 
+
 def symmetric_padding(mask, target_shape):
     """ Symmetric padding without resizing to make translation invariant iou computation"""
     h, w = mask.shape
@@ -60,7 +63,6 @@ def symmetric_padding(mask, target_shape):
                          mode='constant', constant_values=0)
     
     return padded_mask
-
 
 
 def compute_iou(mask1, mask2, mode='translate', plot=False):
