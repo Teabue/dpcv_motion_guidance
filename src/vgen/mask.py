@@ -13,6 +13,7 @@ def get_bounding_box(mask):
 def letterbox_resize(mask, target_shape):
     """
     Resizes a binary mask while preserving aspect ratio and pads to fit the target shape.
+    This makes the mask translation and scale invariant.
     
     Args:
         mask (np.ndarray): The binary mask to be resized.
@@ -43,6 +44,25 @@ def letterbox_resize(mask, target_shape):
     
     return padded_mask
 
+def symmetric_padding(mask, target_shape):
+    """ Symmetric padding without resizing to make translation invariant iou computation"""
+    h, w = mask.shape
+    target_h, target_w = target_shape
+
+    # Compute padding
+    pad_top = (target_h - h) // 2
+    pad_bottom = target_h - h - pad_top
+    pad_left = (target_w - w) // 2
+    pad_right = target_w - w - pad_left
+
+    # Apply symmetric padding
+    padded_mask = np.pad(mask, ((pad_top, pad_bottom), (pad_left, pad_right)), 
+                         mode='constant', constant_values=0)
+    
+    return padded_mask
+
+
+
 def compute_iou(mask1, mask2, mode='translate', plot=False):
     """Compute iou between two binary masks"""
     bbox1 = get_bounding_box(mask1)
@@ -55,23 +75,27 @@ def compute_iou(mask1, mask2, mode='translate', plot=False):
     mask1_cropped = mask1[bbox1[0]:bbox1[1]+1, bbox1[2]:bbox1[3]+1]
     mask2_cropped = mask2[bbox2[0]:bbox2[1]+1, bbox2[2]:bbox2[3]+1]
 
+    # Find maximum dimensions
+    target_shape = (max(mask1_cropped.shape[0], mask2_cropped.shape[0]),
+                    max(mask1_cropped.shape[1], mask2_cropped.shape[1]))
+    
     if mode == 'translate':
-        # Find maximum dimensions
-        target_shape = (max(mask1_cropped.shape[0], mask2_cropped.shape[0]),
-                        max(mask1_cropped.shape[1], mask2_cropped.shape[1]))
-
-        # Letterbox resize both masks
+        mask1_cropped = symmetric_padding(mask1_cropped, target_shape)
+        mask2_cropped = symmetric_padding(mask2_cropped, target_shape)
+    elif mode == 'translate-scale':
         mask1_cropped = letterbox_resize(mask1_cropped, target_shape)
         mask2_cropped = letterbox_resize(mask2_cropped, target_shape)
-        
-        if plot:
-            plt.subplot(1, 2, 1)
-            plt.imshow(mask1_cropped)
-            plt.title('Mask 1')
-            plt.subplot(1, 2, 2)
-            plt.imshow(mask2_cropped)
-            plt.title('Mask 2')
-            plt.show()
+    else:
+        raise NotImplementedError(f"Mode '{mode}' is not implemented.")
+    
+    if plot:
+        plt.subplot(1, 2, 1)
+        plt.imshow(mask1_cropped)
+        plt.title('Mask 1')
+        plt.subplot(1, 2, 2)
+        plt.imshow(mask2_cropped)
+        plt.title('Mask 2')
+        plt.show()
     # TODO: Insert reshaping orignal mask to match target flow shape for other modes like rotate and scale
 
     # Compute IoU
