@@ -8,6 +8,7 @@ from segment_anything import sam_model_registry, SamPredictor
 import torch.backends
 import torch.backends.mps
 
+from datetime import datetime
 from skimage.morphology import skeletonize
 from scipy.ndimage import distance_transform_edt
 import skfmm
@@ -152,6 +153,7 @@ with gr.Blocks() as demo:
 
     # States
     state_translation_center = gr.State()
+    state_frame_points = gr.State()
     state_number_of_frames = gr.State(value = 3)
     state_motion_option = gr.State(value = "Segment")
     
@@ -160,6 +162,7 @@ with gr.Blocks() as demo:
     text_number_of_frames = gr.Textbox(placeholder="Number of frames", interactive=False, visible=False)
     
     # Buttons
+    button_make_video = gr.Button("Make Video", visible=True, interactive=False)
     button_motion_option = gr.Radio(["Segment", "Translate"], label="Motion Guidance", info="Choose among the available motion guidance options", value="Segment", visible=False, interactive=False)
     
     # --------------------------------------------------------------------
@@ -234,22 +237,24 @@ with gr.Blocks() as demo:
                 state_translation_center,
                 state_motion_option,
                 text_number_of_frames],
-        outputs=[state_number_of_frames, image_guidance]
+        outputs=[state_number_of_frames, image_guidance, state_frame_points]
     )
     def on_state_number_of_frames_change(image, mask_center, motion_state, text):
         """Update text box with the number of frames"""
-        if text is not None:
+        if text.isdigit() and not text == "0":
             new_frames = int(text)
-            return new_frames, on_paint(image, mask_center, new_frames, motion_state)
+            new_image, new_frame_points = on_paint(image, mask_center, new_frames, motion_state)
+            return new_frames, new_image, new_frame_points
         else:
-            return None
+            return None, image['background'], None
     
     @image_editing.apply(
         inputs=[image_editing, 
                 state_translation_center, 
                 state_number_of_frames, 
                 state_motion_option],
-        outputs=image_guidance,
+        outputs=[image_guidance, 
+                 state_frame_points]
     )
     def on_paint(image, mask_center, frames, motion_state):
         """Apply an approximation of the motion from the mask center
@@ -257,7 +262,7 @@ with gr.Blocks() as demo:
         
         # If no mask center is provided, return the original image
         if mask_center is None:
-            return image['background']
+            return image['background'], None
         
         # Make the scribble a binary mask
         scribble = cv2.cvtColor(image['layers'][0], cv2.COLOR_RGBA2GRAY)
@@ -265,7 +270,7 @@ with gr.Blocks() as demo:
         
         # If no scribble is drawn, return the original image
         if scribble.sum() == 0:
-            return image['background']
+            return image['background'], None
     
         frame_points = make_scribble_to_frames(scribble = scribble, 
                                                sam_center = mask_center, 
@@ -286,7 +291,7 @@ with gr.Blocks() as demo:
                                         thickness=arrow_width, 
                                         )
             
-            return image
+            return image, frame_points
             
             # # Extract the minimum and maximum coordinates of the mask
             # y_coords, x_coords = np.where(mask > 0)
@@ -309,6 +314,30 @@ with gr.Blocks() as demo:
             # return image
         else:
             raise NotImplementedError("Only translation is implemented for now.")
+    
+    # Make the button to save the frame points visible
+    @state_frame_points.change(
+        inputs=[state_frame_points],
+        outputs=[button_make_video],
+    )
+    def on_new_frame_points(frame_points):
+        """Make the button to save the frame points visible"""
+        # Only make it possible to make a video if there are frame points
+        if frame_points is not None:
+            return gr.update(interactive=True)
+        else:
+            return gr.update(interactive=False)
+    
+    # Save the frame points to an npy file
+    @button_make_video.click(
+        inputs=[state_frame_points],
+        outputs=[button_make_video],
+    )
+    def on_make_video(frame_points):
+        if frame_points is not None:
+            # Save the frame points to a npy file
+            np.save(f"frame_points-{datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}.npy", frame_points)
+            return gr.update(interactive=False)
     
     # Make the editing interactable depending on the button state
     @button_motion_option.select(
