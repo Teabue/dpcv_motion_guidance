@@ -10,6 +10,7 @@ from torchvision import utils
 from torchvision.transforms.functional import to_tensor
 
 
+from flow import get_masked_flow
 from ldm.models.diffusion.ddim_with_grad import DDIMSamplerWithGrad
 from ldm.util import instantiate_from_config
 from losses import FlowLoss
@@ -46,17 +47,30 @@ def load_model_from_config(config, ckpt, device=None):
     return model
 
 
+def get_mask_dummy():
+    """Dummy function for now ..."""
+
+    return None
+
+
 def generate_video(
     save_dir,
     model,
     src_img,
+    target_points,
     guidance_schedule,
-    guidance_energy,
     start_zt=None,
-    edit_mask=None,
+#    edit_mask=None,
     cached_latents=None,
     prompt='',
+    guidance_energy_settings=None,
+    get_mask=get_mask_dummy, # TODO
+    get_flow=get_masked_flow,
+    device=None,
 ):
+
+    if guidance_energy_settings is None:
+        guidance_energy_settings = {}
 
     save_dir = Path(save_dir)
     save_dir.mkdir(exist_ok=False, parents=True)
@@ -66,6 +80,10 @@ def generate_video(
 
     torch.set_grad_enabled(False)
 
+    # How are we going to create an edit mask for each intermediate frame?
+    # For now we are just going to fall back on the default from the original
+    # generate.py-script: A mask of all zeros. Will this even work?
+    edit_mask = None
     if edit_mask is None:
         edit_mask = torch.zeros(1,4,64,64).bool()
 
@@ -73,51 +91,70 @@ def generate_video(
     uncond_embed = model.module.get_learned_conditioning([''])
     cond_embed = model.module.get_learned_conditioning([prompt])
 
-    # Prepare sample output directory
-    sample_save_dir = save_dir / 'sample'
-    sample_save_dir.mkdir(exist_ok=False, parents=True)
+    for frameno, cur_target in enumerate(target_points):
+        # Currently target_points contains a list of target *flows*, which is
+        # not the end goal but just to be able to test the script. In the future
+        # get_mask() and get_flow() should be able to *create* (edit) masks and
+        # flows based on the translational vectors provided in the target_points
+        # list (one for each intermediate frame).
+#        target_mask = get_mask()
+#        target_flow = get_flow(target_mask, x, y)
 
-    # Sample
-    ddim_steps = 500
-    scale = 7.5
-    ddim_eta = 0.0
-    num_recursive_steps = 10
-    clip_grad = 200.0
-    guidance_weight = 300.0
-    log_freq = 5
-    sample, start_zt, info = sampler.sample(
-        num_ddim_steps=ddim_steps,
-        cond_embed=cond_embed,
-        uncond_embed=uncond_embed,
-        batch_size=1,
-        shape=[4, 64, 64],
-        CFG_scale=scale,
-        eta=ddim_eta,
-        src_img=src_img,
-        start_zt=start_zt,
-        guidance_schedule=guidance_schedule,
-        cached_latents=cached_latents,
-        edit_mask=edit_mask,
-        num_recursive_steps=num_recursive_steps,
-        clip_grad=clip_grad,
-        guidance_weight=guidance_weight,
-        log_freq=log_freq,
-        results_folder=sample_save_dir,
-        guidance_energy=guidance_energy,
-    )
+        # Prepare flow loss
+        #
+        # This now needs to be done for each frame since the flow is different
+        # for each frame(!)
+        guidance_energy = FlowLoss(
+#            target_flow=target_flow,
+            target_flow=cur_target,
+            **guidance_energy_settings,
+        ).to(device)
 
-    # Decode sampled latent
-    sample_img = model.module.decode_first_stage(sample)
-    sample_img = torch.clamp((sample_img + 1.0) / 2.0, min=0.0, max=1.0)
+        # Prepare sample output directory
+        sample_save_dir = save_dir / f'frame{frameno:03d}' / 'sample'
+        sample_save_dir.mkdir(exist_ok=False, parents=True)
 
-    # Save
-    utils.save_image(sample_img, sample_save_dir / 'pred.png')
-    np.save(sample_save_dir / 'losses.npy', info['losses'])
-    np.save(sample_save_dir / 'losses_flow.npy', info['losses_flow'])
-    np.save(sample_save_dir / 'losses_color.npy', info['losses_color'])
-    np.save(sample_save_dir / 'noise_norms.npy', info['noise_norms'])
-    np.save(sample_save_dir / 'guidance_norms.npy', info['guidance_norms'])
-    torch.save(start_zt, sample_save_dir / 'start_zt.pth')
+        # Sample
+        ddim_steps = 500
+        scale = 7.5
+        ddim_eta = 0.0
+        num_recursive_steps = 10
+        clip_grad = 200.0
+        guidance_weight = 300.0
+        log_freq = 5
+        sample, start_zt, info = sampler.sample(
+            num_ddim_steps=ddim_steps,
+            cond_embed=cond_embed,
+            uncond_embed=uncond_embed,
+            batch_size=1,
+            shape=[4, 64, 64],
+            CFG_scale=scale,
+            eta=ddim_eta,
+            src_img=src_img,
+            start_zt=start_zt,
+            guidance_schedule=guidance_schedule,
+            cached_latents=cached_latents,
+            edit_mask=edit_mask,
+            num_recursive_steps=num_recursive_steps,
+            clip_grad=clip_grad,
+            guidance_weight=guidance_weight,
+            log_freq=log_freq,
+            results_folder=sample_save_dir,
+            guidance_energy=guidance_energy,
+        )
+
+        # Decode sampled latent
+        sample_img = model.module.decode_first_stage(sample)
+        sample_img = torch.clamp((sample_img + 1.0) / 2.0, min=0.0, max=1.0)
+
+        # Save
+        utils.save_image(sample_img, sample_save_dir / 'pred.png')
+        np.save(sample_save_dir / 'losses.npy', info['losses'])
+        np.save(sample_save_dir / 'losses_flow.npy', info['losses_flow'])
+        np.save(sample_save_dir / 'losses_color.npy', info['losses_color'])
+        np.save(sample_save_dir / 'noise_norms.npy', info['noise_norms'])
+        np.save(sample_save_dir / 'guidance_norms.npy', info['guidance_norms'])
+        torch.save(start_zt, sample_save_dir / 'start_zt.pth')
 
 
 def load_latents(path):
@@ -212,26 +249,33 @@ def main():
     cached_latents = load_latents(input_dir / 'latents')
 
     # Prepare flow loss
-    # TODO: discretize target_flow into multiple steps
+    guidance_energy_settings = {
+        'color_weight': args.color_weight,
+        'flow_weight': args.flow_weight,
+        'oracle': False,
+#        'target_flow': target_flow,
+        'occlusion_masking': True,
+    }
+
+    # Target *flows* for now, but once we have the code for getting masks and
+    # flows, the target points should (apparently?) instead be translation
+    # vectors? Or?
+    target_points = []
     target_flow = torch.load(input_dir / 'flows' / args.target_flow)
-    guidance_energy = FlowLoss(
-        args.color_weight,
-        args.flow_weight,
-        oracle=False,
-        target_flow=target_flow,
-        occlusion_masking=True,
-    ).to(device)
+    target_points = [float(n)*target_flow/float(NUM_FRAMES) for n in range(1,NUM_FRAMES+1)]
 
     generate_video(
         output_dir / 'generate_video',
         model,
         src_img,
+        target_points,
         guidance_schedule,
-        guidance_energy,
         start_zt=start_zt,
-        edit_mask=edit_mask,
+#        edit_mask=edit_mask,
         cached_latents=cached_latents,
         prompt=args.prompt,
+        guidance_energy_settings=guidance_energy_settings,
+        device=device,
     )
 
 
