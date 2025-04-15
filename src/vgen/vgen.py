@@ -15,7 +15,7 @@ from ldm.util import instantiate_from_config
 from losses import FlowLoss
 
 
-LOG = logging.getLogger('vidgen')
+LOG = logging.getLogger('vgen')
 
 
 NUM_FRAMES = 3
