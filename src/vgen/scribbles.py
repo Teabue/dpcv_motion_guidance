@@ -166,7 +166,7 @@ with gr.Blocks() as demo:
     button_motion_option = gr.Radio(["Segment", "Translate"], label="Motion Guidance", info="Choose among the available motion guidance options", value="Segment", visible=False, interactive=False)
     
     # --------------------------------------------------------------------
-    # --                     Gradio Events                             --
+    # --                     Gradio Events                              --
     # --------------------------------------------------------------------
     # Upload image
     @image_input.upload(
