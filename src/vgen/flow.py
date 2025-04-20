@@ -44,7 +44,7 @@ def get_masked_flow(mask: np.ndarray,
 if __name__ == '__main__':
     # Example usage, click around to see the flow change
     import cv2
-    from gui.colorwheel import flow_to_image
+    from vgen.gui.colorwheel import flow_to_image
 
     def mouse_callback(event, x, y, flags, param):
         global target_point, flow, flow_im
