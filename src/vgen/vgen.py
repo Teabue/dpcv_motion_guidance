@@ -10,10 +10,10 @@ from torchvision import utils
 from torchvision.transforms.functional import to_tensor
 
 
-from flow import get_masked_flow
+from vgen.flow import get_masked_flow
 from ldm.models.diffusion.ddim_with_grad import DDIMSamplerWithGrad
 from ldm.util import instantiate_from_config
-from losses import FlowLoss
+from motion_guidance.losses import FlowLoss
 
 
 LOG = logging.getLogger('vgen')

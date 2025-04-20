@@ -11,7 +11,7 @@ from torchvision.transforms.functional import to_tensor
 
 from ldm.util import instantiate_from_config
 from ldm.models.diffusion.ddim_with_grad import DDIMSamplerWithGrad
-from losses import FlowLoss
+from motion_guidance.losses import FlowLoss
 
 
 

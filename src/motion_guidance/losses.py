@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 from torch.nn.functional import l1_loss
-from flow_utils import warp, normalize_flow
-from flow_viz import flow_to_image
+from motion_guidance.flow_utils import warp, normalize_flow
+from motion_guidance.flow_viz import flow_to_image
 from PIL import Image
 
 class FlowLoss(nn.Module):
