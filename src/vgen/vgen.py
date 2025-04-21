@@ -1,25 +1,24 @@
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 
-
+import cv2
+import torch
 import numpy as np
 from omegaconf import OmegaConf
-from PIL import Image
-import torch
 from torchvision import utils
 from torchvision.transforms.functional import to_tensor
 
-
+from vgen.edit_mask import get_edit_mask
+from vgen.object_mask import automatic_mask
 from vgen.flow import get_masked_flow
 from ldm.models.diffusion.ddim_with_grad import DDIMSamplerWithGrad
 from ldm.util import instantiate_from_config
+from ldm.models.diffusion.ddim_inversion import DDIMInversion
 from motion_guidance.losses import FlowLoss
 
 
 LOG = logging.getLogger('vgen')
-
-
-NUM_FRAMES = 3
 
 
 def load_model_from_config(config, ckpt, device=None):
@@ -47,28 +46,20 @@ def load_model_from_config(config, ckpt, device=None):
     return model
 
 
-def get_mask_dummy():
-    """Dummy function for now ..."""
-
-    return None
-
-
 def generate_video(
     save_dir,
     model,
-    src_img,
+    src_img_path,
+    initial_mask,
     target_points,
     guidance_schedule,
-    start_zt=None,
-#    edit_mask=None,
-    cached_latents=None,
     prompt='',
     guidance_energy_settings=None,
-    get_mask=get_mask_dummy, # TODO
-    get_flow=get_masked_flow,
+    # get_mask_fn=automatic_mask, #NOTE: do we need this to be flexible?
+    # get_flow_fn=get_masked_flow,
     device=None,
 ):
-
+    
     if guidance_energy_settings is None:
         guidance_energy_settings = {}
 
@@ -77,44 +68,39 @@ def generate_video(
 
     # Prepare DDIM sampler and guidance info
     sampler = DDIMSamplerWithGrad(model)
-
+    inverter = DDIMInversion(model)
+    
     torch.set_grad_enabled(False)
-
-    # How are we going to create an edit mask for each intermediate frame?
-    # For now we are just going to fall back on the default from the original
-    # generate.py-script: A mask of all zeros. Will this even work?
-    edit_mask = None
-    if edit_mask is None:
-        edit_mask = torch.zeros(1,4,64,64).bool()
 
     # Prepare prompt embeddings
     uncond_embed = model.module.get_learned_conditioning([''])
     cond_embed = model.module.get_learned_conditioning([prompt])
 
-    for frameno, cur_target in enumerate(target_points):
-        # Currently target_points contains a list of target *flows*, which is
-        # not the end goal but just to be able to test the script. In the future
-        # get_mask() and get_flow() should be able to *create* (edit) masks and
-        # flows based on the translational vectors provided in the target_points
-        # list (one for each intermediate frame).
-#        target_mask = get_mask()
-#        target_flow = get_flow(target_mask, x, y)
+    prev_mask = None
+    
+    for frameno, cur_target in enumerate(target_points):        
+        # ------------------------------- 1. Load image ------------------------------ #
+        # (TODO: tmp, no need to load the image but I need to sleep)
+        if frameno == 0:
+            src_img = cv2.imread(str(src_img_path / 'start.png'))
+        else:
+            src_img = cv2.imread(str(src_img_path / f'frames/{frameno:03d}/pred.png'))
+        src_img = cv2.cvtColor(src_img, cv2.COLOR_BGR2RGB)
+        src_img_tensor = to_tensor(src_img)[None] * 2 - 1
+        src_img_tensor = src_img_tensor.to(device)
 
-        # Prepare flow loss
-        #
-        # This now needs to be done for each frame since the flow is different
-        # for each frame(!)
-        guidance_energy = FlowLoss(
-#            target_flow=target_flow,
-            target_flow=cur_target,
-            **guidance_energy_settings,
-        ).to(device)
+        if frameno == 0:
+            cur_mask = initial_mask
+        else:
+            cur_mask = automatic_mask(src_img, prev_mask, cur_target)
+        cur_target_flow = get_masked_flow(cur_mask, cur_target, dilate=True)
+        
+        # ------------------------ 2. Generate cached latents ------------------------ #
+        # Get the latent representation of the source image
+        src_img_latent = inverter.model.module.get_first_stage_encoding(
+            model.module.encode_first_stage(src_img_tensor))
 
-        # Prepare sample output directory
-        sample_save_dir = save_dir / f'frame{frameno:03d}' / 'sample'
-        sample_save_dir.mkdir(exist_ok=False, parents=True)
-
-        # Sample
+        # DDIM configs NOTE: HARD CODED AAAAAAAA
         ddim_steps = 500
         scale = 7.5
         ddim_eta = 0.0
@@ -122,6 +108,48 @@ def generate_video(
         clip_grad = 200.0
         guidance_weight = 300.0
         log_freq = 5
+        
+        # Prepare sample output directory
+        sample_save_dir = save_dir / 'frames' / f'{frameno:03d}'
+        sample_save_dir.mkdir(exist_ok=False, parents=True)
+        
+        dummy_operation = SimpleNamespace()
+        dummy_operation.save_latents = True
+        dummy_operation.folder = sample_save_dir
+        
+        inverter.sample(
+            S=ddim_steps,
+            batch_size=1,
+            shape=[4, 64, 64],
+            operation=dummy_operation,
+            conditioning=cond_embed,
+            eta=ddim_eta,
+            verbose=False,
+            unconditional_guidance_scale=scale,
+            unconditional_conditioning=uncond_embed,
+            start_zt=src_img_latent # input is z0 and it saves zt, I do love input variable names
+        )
+
+        latents = []
+        for i in range(500):    # TODO: HARDCODED! And this wasn't even my comment, how fun!
+            latent_path = sample_save_dir / 'latents' / f'zt.{i:05}.pth'
+            latents.append(torch.load(latent_path))
+        cached_latents = torch.stack(latents)
+    
+        # --------------------------- 3. Generate edit mask -------------------------- #
+        
+        edit_mask = torch.from_numpy(
+            get_edit_mask(cur_target_flow, shape=[4, 64, 64])[None]
+            ).to(device)
+        
+        # -------------------------------- 4. Generate ------------------------------- #
+        guidance_energy = FlowLoss(
+            target_flow=torch.from_numpy(
+                np.moveaxis(cur_target_flow, -1, 0)[None]
+                ).to(device),
+            **guidance_energy_settings,
+        ).to(device)
+
         sample, start_zt, info = sampler.sample(
             num_ddim_steps=ddim_steps,
             cond_embed=cond_embed,
@@ -131,7 +159,10 @@ def generate_video(
             CFG_scale=scale,
             eta=ddim_eta,
             src_img=src_img,
-            start_zt=start_zt,
+            # TODO: I can't figure out whether it should be z500 from the cached 
+            #latents or just make it make a new. 
+            #My intuition says make it init a new noisy latent...
+            start_zt=None, 
             guidance_schedule=guidance_schedule,
             cached_latents=cached_latents,
             edit_mask=edit_mask,
@@ -155,6 +186,8 @@ def generate_video(
         np.save(sample_save_dir / 'noise_norms.npy', info['noise_norms'])
         np.save(sample_save_dir / 'guidance_norms.npy', info['guidance_norms'])
         torch.save(start_zt, sample_save_dir / 'start_zt.pth')
+        
+        prev_mask = cur_mask
 
 
 def load_latents(path):
@@ -170,7 +203,7 @@ def main():
     parser = argparse.ArgumentParser()
 
     # General parameters
-    parser.add_argument('input_dir', metavar='INPUT_DIR', type=Path, help='location of src img, flows, etc.')
+    parser.add_argument('input_dir', metavar='INPUT_DIR', type=Path, help='location of src img, pregenerated target points and initial object mask')
     parser.add_argument('output_dir', metavar='OUTPUT_DIR', type=Path, help='path to save results')
 
     # Diffusion model setup
@@ -181,9 +214,9 @@ def main():
     parser.add_argument('--prompt', default='')
 
     # Guidance parameters
-    parser.add_argument('--edit-mask', metavar='PATH', type=Path, default=None, help='path to edit mask')
+    # parser.add_argument('--edit-mask', metavar='PATH', type=Path, default=None, help='path to edit mask')
     parser.add_argument('--guidance-schedule', metavar='PATH', type=Path, default='data/guidance_schedule.npy', help='use a custom guidance schedule')
-    parser.add_argument('--target-flow', metavar='PATH', type=Path, default='target.pth', help='path to target flow')
+    # parser.add_argument('--target-flow', metavar='PATH', type=Path, default='target.pth', help='path to target flow')
     parser.add_argument('--color-weight', type=float, default=100.0)
     parser.add_argument('--flow-weight', type=float, default=3.0)
 
@@ -228,51 +261,33 @@ def main():
         device_ids=range(torch.cuda.device_count()),
     )
     model.eval()
-
-    # Load source image
-    src_img = to_tensor(Image.open(input_dir / 'pred.png'))[None] * 2 - 1
-    src_img = src_img.to(device)
-
-    # Prepare initial noise
-    start_zt = torch.load(input_dir / 'start_zt.pth')
-
-    # Prepare edit mask
-    if args.edit_mask is not None:
-        edit_mask = torch.load(input_dir / 'flows' / args.edit_mask)
-    else:
-        edit_mask = None
+    
+    # Load initial object mask
+    initial_mask = np.load(input_dir / 'initial_mask.npy')
 
     # Prepare guidance schedule
     guidance_schedule = np.load(args.guidance_schedule)
 
-    # Prepare latents
-    cached_latents = load_latents(input_dir / 'latents')
-
+    # Target *flows* for now, but once we have the code for getting masks and
+    # flows, the target points should (apparently?) instead be translation
+    # vectors? Or?
+    target_points = np.load(input_dir / 'target_points.npy')
+    
     # Prepare flow loss
     guidance_energy_settings = {
         'color_weight': args.color_weight,
         'flow_weight': args.flow_weight,
         'oracle': False,
-#        'target_flow': target_flow,
         'occlusion_masking': True,
     }
-
-    # Target *flows* for now, but once we have the code for getting masks and
-    # flows, the target points should (apparently?) instead be translation
-    # vectors? Or?
-    target_points = []
-    target_flow = torch.load(input_dir / 'flows' / args.target_flow)
-    target_points = [float(n)*target_flow/float(NUM_FRAMES) for n in range(1,NUM_FRAMES+1)]
-
+    
     generate_video(
         output_dir / 'generate_video',
         model,
-        src_img,
+        input_dir / 'start.png',
+        initial_mask,
         target_points,
         guidance_schedule,
-        start_zt=start_zt,
-#        edit_mask=edit_mask,
-        cached_latents=cached_latents,
         prompt=args.prompt,
         guidance_energy_settings=guidance_energy_settings,
         device=device,

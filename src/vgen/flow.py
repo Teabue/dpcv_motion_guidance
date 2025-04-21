@@ -1,4 +1,6 @@
 from typing import List, Tuple, Union
+
+import cv2
 import numpy as np
 
 
@@ -16,7 +18,8 @@ def get_translation_flow(cur_pos, target_pos, hw=(512, 512)) -> np.ndarray:
 
 def get_masked_flow(mask: np.ndarray, 
          target_point: Union[List[int], Tuple[int, int], np.ndarray], 
-         mode = 'translate') -> np.ndarray:
+         mode = 'translate',
+         dilate = False) -> np.ndarray:
     """Generates flow by moving the center mass of the mask to the target point.
 
     Args:
@@ -38,13 +41,17 @@ def get_masked_flow(mask: np.ndarray,
     else:
         raise NotImplementedError(f"Flow: Mode {mode} not implemented")
     
+    if dilate: # Paper dilates, we dilate :)
+        kernel = np.ones((3, 3), np.uint8)
+        mask = cv2.dilate(mask.astype(np.uint8), kernel, iterations=1)
+        
     return flow * mask[..., None]
     
 
 if __name__ == '__main__':
     # Example usage, click around to see the flow change
     import cv2
-    from vgen.gui.colorwheel import flow_to_image
+    from motion_guidance.gui.colorwheel import flow_to_image
 
     def mouse_callback(event, x, y, flags, param):
         global target_point, flow, flow_im

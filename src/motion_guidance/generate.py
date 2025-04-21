@@ -89,9 +89,10 @@ def main():
     # Setup model
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model = model.to(device)
+    import pdb; pdb.set_trace()
     model = torch.nn.DataParallel(model, device_ids=range(torch.cuda.device_count()))
     model.eval()
-
+    
     # Get DDIM sampler + guidance info
     sampler = DDIMSamplerWithGrad(model)
 

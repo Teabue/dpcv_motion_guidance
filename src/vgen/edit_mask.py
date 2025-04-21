@@ -1,16 +1,19 @@
-import matplotlib.pyplot as plt
-import numpy as np
 from typing import Optional
 
-from vgen.flow import get_masked_flow
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
 
-def get_edit_mask(flow: np.ndarray, save_path: Optional[str] = None) -> np.ndarray:
+
+def get_edit_mask(flow: np.ndarray, output_shape: list, save_path: Optional[str] = None) -> np.ndarray:
     """Automatically generates a mask that specifies all locations 
     that any pixel is moving to or from
 
     Args:
         flow (np.ndarray): The optical flow for the image
         2D array of shape (H, W, 2)
+        output_shape (list): The target shape of the output mask
+            (C, H, W)
         save_path (Optional[str] = None): Path to save the edit mask. 
             Defaults to None.
 
@@ -39,10 +42,16 @@ def get_edit_mask(flow: np.ndarray, save_path: Optional[str] = None) -> np.ndarr
     if save_path is not None:
         np.save(save_path, edit_mask)
     
-    return edit_mask.astype(bool)
+    edit_mask_bool = cv2.resize(edit_mask, (output_shape[1], output_shape[2]), interpolation=cv2.INTER_NEAREST)
+    edit_mask_bool = edit_mask.astype(bool)
+    edit_mask_bool = np.repeat(edit_mask_bool[None], output_shape[0], axis=0)
+    
+    return edit_mask_bool #(C, H, W)
     
 
 if __name__ == "__main__":
+    from vgen.flow import get_masked_flow
+
     # Load mask and frame points
     mask = np.load('mask.npy')
     frame_points = np.load('frame_points-2025-04-15_19:03:32.npy')
