@@ -356,4 +356,8 @@ with gr.Blocks() as demo:
         
     
 if __name__ == "__main__":  
-    demo.launch()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--bind-wildcard', action='store_true')
+    args = parser.parse_args()
+    demo.launch(server_name='0.0.0.0' if args.bind_wildcard else None)
