@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 import cv2
-from segment_anything import sam_model_registry, SamPredictor
+from segment_anything import sam_model_registry, SamPredictor, SamAutomaticMaskGenerator
 
 
 def get_bounding_box(mask):
@@ -97,7 +97,7 @@ def compute_iou(mask1, mask2, mode='translate', plot=False):
         plt.subplot(1, 2, 2)
         plt.imshow(mask2_cropped)
         plt.title('Mask 2')
-        plt.show()
+        # plt.show()
     # TODO: Insert reshaping orignal mask to match target flow shape for other modes like rotate and scale
 
     # Compute IoU
@@ -105,7 +105,42 @@ def compute_iou(mask1, mask2, mode='translate', plot=False):
     union = np.logical_or(mask1_cropped, mask2_cropped).sum()
     
     return intersection / union if union > 0 else 0.0
+
+
+def compute_mask_score(mask, 
+                       gt_mask, 
+                       centroid_target, 
+                       image_shape, 
+                       iou_weight=1.5, 
+                       distance_weight=1.0) -> float:
+    """
+    Args:
+        mask (np.ndarray): 
+        gt_mask (np.ndarray): Previous mask
+        centroid_target (tuple | list | np.ndarray): Target point
+        image_shape (tuple | list): image shape in (h, w) format
+        iou_weight (float): Defaults to 1.5.
+        distance_weight (float): Defaults to 1.0.
+
+    Returns:
+        float: Weighted loss
+    """
     
+    # IOU loss
+    iou = compute_iou(mask, gt_mask)
+    L_iou = 1 - iou
+
+    # centroid distance loss
+    ys, xs = np.nonzero(mask)
+    centroid_pred = np.array([xs.mean(), ys.mean()])
+    W, H = image_shape[1], image_shape[0]
+    d = np.linalg.norm(centroid_pred - centroid_target)
+    d_norm = d / np.sqrt(W*W + H*H)
+    L_dist = d_norm
+
+    # weighted sum
+    return iou_weight * L_iou + distance_weight * L_dist
+
 
 def automatic_mask(img: np.ndarray,
                    prev_mask: np.ndarray,
@@ -113,7 +148,9 @@ def automatic_mask(img: np.ndarray,
                    iou_threshold=0.5, 
                    chkpt_path='./assets/sam_vit_b_01ec64.pth',
                    image_format='RGB',
-                   mode='translate'):
+                   mode='translate',
+                   iou_weight=0.5,
+                   location_weight=0.5):
 
     sam = sam_model_registry['vit_b'](checkpoint=chkpt_path)
     sam.to(device='cpu')
@@ -129,13 +166,31 @@ def automatic_mask(img: np.ndarray,
     best_mask = None
 
     for mask in masks:
-        iou = compute_iou(prev_mask, mask, mode, plot=True)
+        iou = compute_iou(prev_mask, mask, mode, plot=False)
         if iou > best_iou:
             best_iou = iou
             best_mask = mask
 
-    # TODO: Insert if this fails, try generating every mask 
-    return best_mask if best_iou >= iou_threshold else None
+    # Try generating all masks and match the one that matches the best
+    if best_iou < iou_threshold:
+        print('Generating all masks')
+        mask_generator = SamAutomaticMaskGenerator(sam)
+        masks = mask_generator.generate(img)
+        
+        best_mask_score = float('inf')
+        best_mask = None
+        for mask in masks:
+            mask_score = compute_mask_score(mask['segmentation'], 
+                                            prev_mask, 
+                                            target_point, 
+                                            img.shape, 
+                                            iou_weight=iou_weight, 
+                                            distance_weight=location_weight)
+            if mask_score < best_mask_score:
+                best_mask_score = mask_score
+                best_mask = mask['segmentation']
+    
+    return best_mask
 
 
 if __name__ == '__main__':
@@ -168,12 +223,12 @@ if __name__ == '__main__':
     
     plt.imshow(masked_img)
     plt.title('Masked original image and center mass displayed')
-    plt.show()
+    plt.savefig('./assets/mask.png')
     
     # Target point determined from matching the where the center mass was of the orig img
     # This is a little cheaty, since I have assumed with this that the teapot moved 
     # exactly to the target point.
-    target_point = np.array([303, 370])
+    target_point = np.array([200, 200])
     
     img2 = cv2.imread('./assets/moved.png')
     img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2RGB, img2)
@@ -183,4 +238,5 @@ if __name__ == '__main__':
     masked_img2 = cv2.circle(masked_img2, (int(target_point[0]), int(target_point[1])), 10, (0,255,0), -1)
     plt.imshow(masked_img2)
     plt.title('Masked moved image and target point displayed')
-    plt.show()
+    plt.savefig('./assets/mask2.png')
+    # plt.show()
