@@ -43,7 +43,7 @@ def get_edit_mask(flow: np.ndarray, output_shape: list, save_path: Optional[str]
         np.save(save_path, edit_mask)
     
     edit_mask_bool = cv2.resize(edit_mask, (output_shape[1], output_shape[2]), interpolation=cv2.INTER_NEAREST)
-    edit_mask_bool = edit_mask.astype(bool)
+    edit_mask_bool = edit_mask_bool.astype(bool)
     edit_mask_bool = np.repeat(edit_mask_bool[None], output_shape[0], axis=0)
     
     return edit_mask_bool #(C, H, W)
@@ -54,17 +54,17 @@ if __name__ == "__main__":
 
     # Load mask and frame points
     mask = np.load('mask.npy')
-    frame_points = np.load('frame_points-2025-04-15_19:03:32.npy')
+    frame_points = np.load('frame_points-2025-04-15_19:02:57.npy')
     
     for frame in frame_points:
         # Get the flow for the first target point
         flow = get_masked_flow(mask, frame, mode='translate')
         
         # Get the edit mask
-        edit_mask = get_edit_mask(flow)
+        edit_mask = get_edit_mask(flow, output_shape=(4, 64, 64))
         
         # Display edit mask
-        plt.imshow(edit_mask, cmap='gray')
+        plt.imshow(edit_mask.transpose(1, 2, 0)[...,0], cmap='gray')
         plt.title("Edit Mask")
         plt.axis('off')
         plt.show()

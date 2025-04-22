@@ -84,16 +84,16 @@ def generate_video(
         if frameno == 0:
             src_img = cv2.imread(str(src_img_path / 'start.png'))
         else:
-            src_img = cv2.imread(str(src_img_path / f'frames/{frameno:03d}/pred.png'))
+            src_img = cv2.imread(str(src_img_path / f'frames/{frameno - 1:03d}/pred.png'))
         src_img = cv2.cvtColor(src_img, cv2.COLOR_BGR2RGB)
         src_img_tensor = to_tensor(src_img)[None] * 2 - 1
         src_img_tensor = src_img_tensor.to(device)
 
         if frameno == 0:
-            cur_mask = initial_mask
+            prev_mask = initial_mask
         else:
-            cur_mask = automatic_mask(src_img, prev_mask, cur_target)
-        cur_target_flow = get_masked_flow(cur_mask, cur_target, dilate=True)
+            prev_mask = automatic_mask(src_img, prev_prev_mask, prev_target)
+        cur_target_flow = get_masked_flow(prev_mask, cur_target, dilate=True)
         
         # ------------------------ 2. Generate cached latents ------------------------ #
         # Get the latent representation of the source image
@@ -127,11 +127,11 @@ def generate_video(
             verbose=False,
             unconditional_guidance_scale=scale,
             unconditional_conditioning=uncond_embed,
-            start_zt=src_img_latent # input is z0 and it saves zt, I do love input variable names
+            start_zt=src_img_latent # input is z0 and it saves all zts, I do love input variable names
         )
 
         latents = []
-        for i in range(500):    # TODO: HARDCODED! And this wasn't even my comment, how fun!
+        for i in range(ddim_steps):    # TODO: HARDCODED! And this wasn't even my comment, how fun!
             latent_path = sample_save_dir / 'latents' / f'zt.{i:05}.pth'
             latents.append(torch.load(latent_path))
         cached_latents = torch.stack(latents)
@@ -145,10 +145,10 @@ def generate_video(
         # -------------------------------- 4. Generate ------------------------------- #
         guidance_energy = FlowLoss(
             target_flow=torch.from_numpy(
-                np.moveaxis(cur_target_flow, -1, 0)[None]
+                np.moveaxis(cur_target_flow, -1, 0)[None] # B, C, H, W
                 ).to(device),
             **guidance_energy_settings,
-        ).to(device)
+        ).to(device) # NOTE: From equation 4 from the paper
 
         sample, start_zt, info = sampler.sample(
             num_ddim_steps=ddim_steps,
@@ -162,6 +162,7 @@ def generate_video(
             # TODO: I can't figure out whether it should be z500 from the cached 
             #latents or just make it make a new. 
             #My intuition says make it init a new noisy latent...
+            # TODO LOAD zt500 instead of None
             start_zt=None, 
             guidance_schedule=guidance_schedule,
             cached_latents=cached_latents,
@@ -187,7 +188,8 @@ def generate_video(
         np.save(sample_save_dir / 'guidance_norms.npy', info['guidance_norms'])
         torch.save(start_zt, sample_save_dir / 'start_zt.pth')
         
-        prev_mask = cur_mask
+        prev_target = cur_target
+        prev_prev_mask = prev_mask
 
 
 def load_latents(path):
