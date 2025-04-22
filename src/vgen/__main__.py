@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+import pdb
 from types import SimpleNamespace
 
 import cv2
@@ -76,30 +77,22 @@ def generate_video(
     uncond_embed = model.module.get_learned_conditioning([''])
     cond_embed = model.module.get_learned_conditioning([prompt])
 
-    prev_mask = None
+    # ------------------------------- 1. Load image ------------------------------ #
+    src_img = cv2.imread(str(src_img_path / 'start.jpeg'))
+    src_img = cv2.cvtColor(src_img, cv2.COLOR_BGR2RGB)
+    prev_mask = initial_mask
     
-    for frameno, cur_target in enumerate(target_points):        
-        # ------------------------------- 1. Load image ------------------------------ #
-        # (TODO: tmp, no need to load the image but I need to sleep)
-        if frameno == 0:
-            src_img = cv2.imread(str(src_img_path / 'start.png'))
-        else:
-            src_img = cv2.imread(str(src_img_path / f'frames/{frameno - 1:03d}/pred.png'))
-        src_img = cv2.cvtColor(src_img, cv2.COLOR_BGR2RGB)
+    for frameno, cur_target in enumerate(target_points[1:]):  
         src_img_tensor = to_tensor(src_img)[None] * 2 - 1
         src_img_tensor = src_img_tensor.to(device)
-
-        if frameno == 0:
-            prev_mask = initial_mask
-        else:
-            prev_mask = automatic_mask(src_img, prev_prev_mask, prev_target)
+    
         cur_target_flow = get_masked_flow(prev_mask, cur_target, dilate=True)
         
         # ------------------------ 2. Generate cached latents ------------------------ #
         # Get the latent representation of the source image
         src_img_latent = inverter.model.module.get_first_stage_encoding(
             model.module.encode_first_stage(src_img_tensor))
-
+        
         # DDIM configs NOTE: HARD CODED AAAAAAAA
         ddim_steps = 500
         scale = 7.5
@@ -120,7 +113,7 @@ def generate_video(
         inverter.sample(
             S=ddim_steps,
             batch_size=1,
-            shape=[4, 64, 64],
+            shape=[4, *src_img_latent.shape[2:]],
             operation=dummy_operation,
             conditioning=cond_embed,
             eta=ddim_eta,
@@ -137,9 +130,8 @@ def generate_video(
         cached_latents = torch.stack(latents)
     
         # --------------------------- 3. Generate edit mask -------------------------- #
-        
         edit_mask = torch.from_numpy(
-            get_edit_mask(cur_target_flow, shape=[4, 64, 64])[None]
+            get_edit_mask(cur_target_flow, output_shape=[4, *src_img_latent.shape[2:]])[None]
             ).to(device)
         
         # -------------------------------- 4. Generate ------------------------------- #
@@ -155,15 +147,11 @@ def generate_video(
             cond_embed=cond_embed,
             uncond_embed=uncond_embed,
             batch_size=1,
-            shape=[4, 64, 64],
+            shape=[4, *src_img_latent.shape[2:]],
             CFG_scale=scale,
             eta=ddim_eta,
-            src_img=src_img,
-            # TODO: I can't figure out whether it should be z500 from the cached 
-            #latents or just make it make a new. 
-            #My intuition says make it init a new noisy latent...
-            # TODO LOAD zt500 instead of None
-            start_zt=None, 
+            src_img=src_img_tensor,
+            start_zt=cached_latents[-1], 
             guidance_schedule=guidance_schedule,
             cached_latents=cached_latents,
             edit_mask=edit_mask,
@@ -188,17 +176,11 @@ def generate_video(
         np.save(sample_save_dir / 'guidance_norms.npy', info['guidance_norms'])
         torch.save(start_zt, sample_save_dir / 'start_zt.pth')
         
-        prev_target = cur_target
-        prev_prev_mask = prev_mask
+        # ------------------------------- 5. Update image and mask ------------------------------ #
+        src_img = cv2.imread(str(sample_save_dir / 'pred.png'))
+        src_img = cv2.cvtColor(src_img, cv2.COLOR_BGR2RGB)
 
-
-def load_latents(path):
-    path = Path(path)
-    latents = []
-    for i in range(500):
-        latents.append(torch.load(path / f'zt.{i:05}.pth'))
-    return torch.stack(latents)
-
+        prev_mask = automatic_mask(src_img, prev_mask, cur_target)
 
 def main():
     import argparse
@@ -286,7 +268,7 @@ def main():
     generate_video(
         output_dir / 'generate_video',
         model,
-        input_dir / 'start.png',
+        input_dir,
         initial_mask,
         target_points,
         guidance_schedule,

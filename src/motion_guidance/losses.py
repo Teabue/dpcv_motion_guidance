@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn.functional import l1_loss
-from motion_guidance.flow_utils import warp, normalize_flow
+from motion_guidance.flow_utils import warp, normalize_flow, RAFT
 from motion_guidance.flow_viz import flow_to_image
 from PIL import Image
 
@@ -13,7 +13,6 @@ class FlowLoss(nn.Module):
         super().__init__()
 
         # Make flow network
-        from flow_utils import RAFT
         self.flow_net = RAFT()
 
         # Get params

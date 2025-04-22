@@ -42,11 +42,12 @@ def get_edit_mask(flow: np.ndarray, output_shape: list, save_path: Optional[str]
     if save_path is not None:
         np.save(save_path, edit_mask)
     
-    edit_mask_bool = cv2.resize(edit_mask, (output_shape[1], output_shape[2]), interpolation=cv2.INTER_NEAREST)
+    # Resize to the output shape - NOTE: The output_shape might be switched
+    edit_mask_bool = cv2.resize(edit_mask, (output_shape[2], output_shape[1]), interpolation=cv2.INTER_NEAREST)
     edit_mask_bool = edit_mask_bool.astype(bool)
     edit_mask_bool = np.repeat(edit_mask_bool[None], output_shape[0], axis=0)
     
-    return edit_mask_bool #(C, H, W)
+    return ~edit_mask_bool #(C, H, W)
     
 
 if __name__ == "__main__":
