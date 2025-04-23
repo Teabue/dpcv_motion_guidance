@@ -78,7 +78,7 @@ def generate_video(
     cond_embed = model.module.get_learned_conditioning([prompt])
 
     # ------------------------------- 1. Load image ------------------------------ #
-    src_img = cv2.imread(str(src_img_path / 'start.jpeg'))
+    src_img = cv2.imread(str(src_img_path / 'start.png'))
     src_img = cv2.cvtColor(src_img, cv2.COLOR_BGR2RGB)
     prev_mask = initial_mask
     
@@ -100,7 +100,7 @@ def generate_video(
         num_recursive_steps = 10
         clip_grad = 200.0
         guidance_weight = 300.0
-        log_freq = 5
+        log_freq = 25
         
         # Prepare sample output directory
         sample_save_dir = save_dir / 'frames' / f'{frameno:03d}'
@@ -124,9 +124,13 @@ def generate_video(
         )
 
         latents = []
-        for i in range(ddim_steps):    # TODO: HARDCODED! And this wasn't even my comment, how fun!
+        for i in range(ddim_steps):
             latent_path = sample_save_dir / 'latents' / f'zt.{i:05}.pth'
             latents.append(torch.load(latent_path))
+            
+        # NOTE: Reverse order because for SOME reason zt 0000 does not mean 0 
+        #step noised, but rather fully noised in their use of cached latents :)))))
+        latents = latents[::-1] 
         cached_latents = torch.stack(latents)
     
         # --------------------------- 3. Generate edit mask -------------------------- #
@@ -151,7 +155,7 @@ def generate_video(
             CFG_scale=scale,
             eta=ddim_eta,
             src_img=src_img_tensor,
-            start_zt=cached_latents[-1], 
+            start_zt=cached_latents[0], 
             guidance_schedule=guidance_schedule,
             cached_latents=cached_latents,
             edit_mask=edit_mask,
