@@ -252,6 +252,7 @@ def main():
     
     # Load initial object mask
     initial_mask = np.load(input_dir / 'initial_mask.npy')
+    initial_mask = cv2.dilate(initial_mask, np.ones((5, 5), np.uint8), iterations=1)
 
     # Prepare guidance schedule
     guidance_schedule = np.load(args.guidance_schedule)
