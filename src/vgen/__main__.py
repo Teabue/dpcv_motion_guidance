@@ -178,6 +178,11 @@ def generate_video(
         np.save(sample_save_dir / 'losses_color.npy', info['losses_color'])
         np.save(sample_save_dir / 'noise_norms.npy', info['noise_norms'])
         np.save(sample_save_dir / 'guidance_norms.npy', info['guidance_norms'])
+        
+        # Target flow + edit mask
+        np.save(sample_save_dir / 'cur_target_flow.npy', cur_target_flow)
+        torch.save(edit_mask, sample_save_dir / 'edit_mask.pth')
+        
         torch.save(start_zt, sample_save_dir / 'start_zt.pth')
         
         # ------------------------------- 5. Update image and mask ------------------------------ #
