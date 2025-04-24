@@ -24,3 +24,9 @@ output_dir/
 └── video.mp4                   # (TODO: stitch 'em up)
 ```
 (Perhaps at a later stage, add argument to save inbetween flows+edit_mask such that frames can be resampled if one was really bad)
+
+## Download checkpoints for inpainting
+```
+wget -O chkpts/inpainting_big.ckpt https://ommer-lab.com/files/latent-diffusion/inpainting_big.zip
+```
+Run the inpainting with inpaint.py.
