@@ -19,7 +19,7 @@ def get_translation_flow(cur_pos, target_pos, hw=(512, 512)) -> np.ndarray:
 def get_masked_flow(mask: np.ndarray, 
          target_point: Union[List[int], Tuple[int, int], np.ndarray], 
          mode = 'translate',
-         dilate = False) -> np.ndarray:
+         dilate = True) -> np.ndarray:
     """Generates flow by moving the center mass of the mask to the target point.
 
     Args:
@@ -43,7 +43,7 @@ def get_masked_flow(mask: np.ndarray,
     
     if dilate: # Paper dilates, we dilate :)
         kernel = np.ones((5, 5), np.uint8)
-        mask = cv2.dilate(mask.astype(np.uint8), kernel, iterations=1)
+        mask = cv2.dilate(mask.astype(np.uint8), kernel, iterations=5)
         
     return flow * mask[..., None]
     
