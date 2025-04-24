@@ -11,7 +11,7 @@ from torchvision.transforms.functional import to_tensor
 
 from ldm.util import instantiate_from_config
 from ldm.models.diffusion.ddim_with_grad import DDIMSamplerWithGrad
-from losses import FlowLoss
+from motion_guidance.losses import FlowLoss
 
 
 
@@ -89,9 +89,10 @@ def main():
     # Setup model
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     model = model.to(device)
+    import pdb; pdb.set_trace()
     model = torch.nn.DataParallel(model, device_ids=range(torch.cuda.device_count()))
     model.eval()
-
+    
     # Get DDIM sampler + guidance info
     sampler = DDIMSamplerWithGrad(model)
 

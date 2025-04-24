@@ -22,7 +22,7 @@ class RAFT(nn.Module):
             model = 'raft-sintel.pth'
 
         # Get location of checkpoints
-        raft_dir = pathlib.Path(__file__).parent.absolute()/'flow_models'/'raft'
+        raft_dir = pathlib.Path(__file__).parent.parent.absolute()/'flow_models'/'raft'
 
         # Emulate arguments
         args = argparse.Namespace()

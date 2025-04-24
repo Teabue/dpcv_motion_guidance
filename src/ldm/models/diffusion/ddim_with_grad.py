@@ -151,6 +151,7 @@ class DDIMSamplerWithGrad(object):
                 else:
                     noise = noise_like(noisy_latent.shape, device, False)
                     gt_latent = a_t.sqrt() * tgt_z0 + (1 - a_t).sqrt() * noise
+                
                 noisy_latent[edit_mask] = gt_latent[edit_mask]
 
                 # Set up grad (for differentiating guidance energy)

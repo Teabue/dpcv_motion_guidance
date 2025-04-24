@@ -166,7 +166,7 @@ with gr.Blocks() as demo:
     button_motion_option = gr.Radio(["Segment", "Translate"], label="Motion Guidance", info="Choose among the available motion guidance options", value="Segment", visible=False, interactive=False)
     
     # --------------------------------------------------------------------
-    # --                     Gradio Events                             --
+    # --                     Gradio Events                              --
     # --------------------------------------------------------------------
     # Upload image
     @image_input.upload(
@@ -336,7 +336,7 @@ with gr.Blocks() as demo:
     def on_make_video(frame_points):
         if frame_points is not None:
             # Save the frame points to a npy file
-            np.save(f"frame_points-{datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}.npy", frame_points)
+            np.save(f"frame_points-{datetime.now().strftime('%Y%m%dT%H%M%SZ')}.npy", frame_points)
             return gr.update(interactive=False)
     
     # Make the editing interactable depending on the button state
@@ -356,4 +356,8 @@ with gr.Blocks() as demo:
         
     
 if __name__ == "__main__":  
-    demo.launch()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--bind-wildcard', action='store_true')
+    args = parser.parse_args()
+    demo.launch(server_name='0.0.0.0' if args.bind_wildcard else None)
