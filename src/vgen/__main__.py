@@ -80,7 +80,11 @@ def generate_video(
     # ------------------------------- 1. Load image ------------------------------ #
     src_img = cv2.imread(str(src_img_path / 'start.png'))
     src_img = cv2.cvtColor(src_img, cv2.COLOR_BGR2RGB)
-    prev_mask = initial_mask
+    prev_mask = to_tensor(initial_mask)
+    
+    # Create an iteratively updated cache
+    cache_mask = to_tensor(initial_mask)
+    master_background = None
     
     for frameno, cur_target in enumerate(target_points[1:]):  
         src_img_tensor = to_tensor(src_img)[None] * 2 - 1
@@ -89,9 +93,25 @@ def generate_video(
         cur_target_flow = get_masked_flow(prev_mask, cur_target, dilate=True)
         
         # ------------------------ 2. Generate cached latents ------------------------ #
+        if master_background is None:
+            master_background = src_img_tensor
+        else:
+            # Find the parts of the original mask that are no longer masked
+            new_background_mask = torch.logical_and(cache_mask, ~prev_mask)
+            new_background_mask = new_background_mask.to(device)
+            
+            # Make mask the same shape as the cached latents
+            new_background_mask = new_background_mask.expand_as(src_img_tensor)
+            
+            # Add the new background cache to the cached latents
+            master_background[new_background_mask] = src_img_tensor[new_background_mask]
+            
+            # Update the cache mask
+            cache_mask = torch.logical_and(cache_mask, prev_mask)
+        
         # Get the latent representation of the source image
         src_img_latent = inverter.model.module.get_first_stage_encoding(
-            model.module.encode_first_stage(src_img_tensor))
+            model.module.encode_first_stage(master_background))
         
         # DDIM configs NOTE: HARD CODED AAAAAAAA
         ddim_steps = 500
