@@ -9,6 +9,7 @@ import numpy as np
 from omegaconf import OmegaConf
 from torchvision import utils
 from torchvision.transforms.functional import to_tensor
+import torch.nn.functional as F
 
 from vgen.edit_mask import get_edit_mask
 from vgen.object_mask import automatic_mask
@@ -47,6 +48,24 @@ def load_model_from_config(config, ckpt, device=None):
     return model
 
 
+def gaussian_blur(latent, sigma):
+    """Apply Gaussian blur to the latent tensor in spatial dimensions."""
+    channels = latent.shape[1]
+    kernel_size = int(6 * sigma + 1) | 1  # Ensure odd kernel size
+    kernel = torch.exp(-torch.arange(-(kernel_size//2), kernel_size//2 + 1, device=latent.device)**2 / (2 * sigma**2))
+    kernel = kernel / kernel.sum()
+    kernel = kernel.view(1, 1, kernel_size, 1).repeat(channels, 1, 1, 1)
+    
+    padded = F.pad(latent, (kernel_size//2, kernel_size//2, 0, 0), mode='reflect')
+    blurred = F.conv2d(padded, kernel, groups=channels)
+    
+    kernel = kernel.view(1, 1, 1, kernel_size)
+    padded = F.pad(blurred, (0, 0, kernel_size//2, kernel_size//2), mode='reflect')
+    blurred = F.conv2d(padded, kernel, groups=channels)
+    
+    return blurred
+
+
 def generate_video(
     save_dir,
     model,
@@ -54,6 +73,7 @@ def generate_video(
     initial_mask,
     target_points,
     guidance_schedule,
+    smooth_border=False,
     prompt='',
     guidance_energy_settings=None,
     # get_mask_fn=automatic_mask, #NOTE: do we need this to be flexible?
@@ -86,7 +106,7 @@ def generate_video(
         src_img_tensor = to_tensor(src_img)[None] * 2 - 1
         src_img_tensor = src_img_tensor.to(device)
     
-        cur_target_flow = get_masked_flow(prev_mask, cur_target, dilate=True)
+        cur_target_flow = get_masked_flow(prev_mask, cur_target, dilate=False)
         
         # ------------------------ 2. Generate cached latents ------------------------ #
         # Get the latent representation of the source image
@@ -132,11 +152,55 @@ def generate_video(
         #step noised, but rather fully noised in their use of cached latents :)))))
         latents = latents[::-1] 
         cached_latents = torch.stack(latents)
-    
-        # --------------------------- 3. Generate edit mask -------------------------- #
+        
+        # --------------------- 3. Generate masks and background --------------------- #
         edit_mask = torch.from_numpy(
             get_edit_mask(cur_target_flow, output_shape=[4, *src_img_latent.shape[2:]])[None]
             ).to(device)
+
+        if frameno == 0:
+            master_zts = cached_latents.clone().detach()
+            initial_bg_mask_latent = cv2.resize(
+                (~initial_mask).astype('uint8'),
+                (cached_latents.shape[-1], cached_latents.shape[-2]),
+                interpolation=cv2.INTER_NEAREST,
+            )
+            # Fill mask: True where the initial image actually shows background
+            bg_fill_mask_latent = torch.from_numpy(initial_bg_mask_latent).unsqueeze(0).unsqueeze(0).bool()
+            bg_fill_mask_latent = bg_fill_mask_latent.expand(-1, 4, -1, -1) # B C H W (latent space)
+        
+        prev_bg_latent = torch.from_numpy(
+            cv2.resize(
+                (~prev_mask).astype('uint8'),
+                (cached_latents.shape[-1], cached_latents.shape[-2]),
+                interpolation=cv2.INTER_NEAREST,
+            )
+        ).unsqueeze(0).unsqueeze(0).bool()
+        prev_bg_latent = prev_bg_latent.expand(-1, 4, -1, -1) # B C H W
+        
+        new_bg = prev_bg_latent & (~bg_fill_mask_latent)
+
+        # For each timestep, graft in newly generated background
+        if new_bg.any():
+            if smooth_border:
+                # Define boundary region: dilate new_bg and intersect with known background
+                kernel = torch.ones(1, 1, 5, 5, device=device)
+                dilated_new_bg = F.conv2d(new_bg.float(), kernel, padding=2) > 0
+                boundary_mask = dilated_new_bg & bg_fill_mask_latent & (~new_bg)
+            
+            for t in range(ddim_steps):
+                updated_latent = master_zts[t].clone()
+                updated_latent[new_bg] = cached_latents[t][new_bg]
+                
+                if smooth_border and boundary_mask.any():
+                    sigma = 1.0  # Adjust for desired smoothness
+                    blurred = gaussian_blur(updated_latent, sigma)
+                    updated_latent[boundary_mask] = blurred[boundary_mask]
+                
+                master_zts[t] = updated_latent
+
+        # Mark them as filled forever
+        bg_fill_mask_latent = bg_fill_mask_latent | prev_bg_latent
         
         # -------------------------------- 4. Generate ------------------------------- #
         guidance_energy = FlowLoss(
@@ -157,7 +221,8 @@ def generate_video(
             src_img=src_img_tensor,
             start_zt=cached_latents[0], 
             guidance_schedule=guidance_schedule,
-            cached_latents=cached_latents,
+            #cached_latents=cached_latents,
+            bg_master_zts=master_zts,
             edit_mask=edit_mask,
             num_recursive_steps=num_recursive_steps,
             clip_grad=clip_grad,
@@ -190,6 +255,7 @@ def generate_video(
         src_img = cv2.cvtColor(src_img, cv2.COLOR_BGR2RGB)
 
         prev_mask = automatic_mask(src_img, prev_mask, cur_target)
+        prev_mask = cv2.dilate(prev_mask.astype('uint8'), np.ones((5, 5), np.uint8), iterations=5).astype(bool)
 
 def main():
     import argparse
@@ -207,11 +273,10 @@ def main():
     parser.add_argument('--prompt', default='')
 
     # Guidance parameters
-    # parser.add_argument('--edit-mask', metavar='PATH', type=Path, default=None, help='path to edit mask')
     parser.add_argument('--guidance-schedule', metavar='PATH', type=Path, default='data/guidance_schedule.npy', help='use a custom guidance schedule')
-    # parser.add_argument('--target-flow', metavar='PATH', type=Path, default='target.pth', help='path to target flow')
     parser.add_argument('--color-weight', type=float, default=100.0)
     parser.add_argument('--flow-weight', type=float, default=3.0)
+    parser.add_argument('--smooth-border', action='store_true', help='smooth the border of the background mask and newly generated background')
 
     # General parameters (low priority)
     parser.add_argument('--debug', action='store_true')
@@ -282,6 +347,7 @@ def main():
         initial_mask,
         target_points,
         guidance_schedule,
+        smooth_border=args.smooth_border,
         prompt=args.prompt,
         guidance_energy_settings=guidance_energy_settings,
         device=device,

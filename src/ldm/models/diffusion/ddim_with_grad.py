@@ -65,6 +65,7 @@ class DDIMSamplerWithGrad(object):
                CFG_scale=1.,
                start_zt=None,
                cached_latents=None,
+               bg_master_zts=None,
                edit_mask=None,
                num_recursive_steps=1,
                clip_grad=0,
@@ -144,15 +145,18 @@ class DDIMSamplerWithGrad(object):
 
             # For each step, do N extra "recursive" steps
             for j in range(num_recursive_steps):
-
-                # Replace latents outside of edit mask, similar to RePaint
-                if cached_latents is not None:
-                    gt_latent = cached_latents[i]
+                if bg_master_zts is not None:
+                    z_bg = bg_master_zts[i]
+                    # re-anchor filled bg pixels
+                    noisy_latent[edit_mask] = z_bg[edit_mask]
                 else:
-                    noise = noise_like(noisy_latent.shape, device, False)
-                    gt_latent = a_t.sqrt() * tgt_z0 + (1 - a_t).sqrt() * noise
-                
-                noisy_latent[edit_mask] = gt_latent[edit_mask]
+                    # fallback to original edit-mask copying if no master
+                    if cached_latents is not None:
+                        gt_latent = cached_latents[i]
+                    else:
+                        noise = noise_like(noisy_latent.shape, device, False)
+                        gt_latent = a_t.sqrt() * tgt_z0 + (1 - a_t).sqrt() * noise
+                    noisy_latent[edit_mask] = gt_latent[edit_mask]
 
                 # Set up grad (for differentiating guidance energy)
                 torch.set_grad_enabled(True)
