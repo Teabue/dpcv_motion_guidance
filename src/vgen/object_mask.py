@@ -3,6 +3,7 @@ import torch
 import cv2
 from segment_anything import sam_model_registry, SamPredictor, SamAutomaticMaskGenerator
 
+from vgen.flow import get_masked_flow
 
 def get_bounding_box(mask):
     """Get Bbox of non-zero region"""
@@ -81,7 +82,7 @@ def compute_iou(mask1, mask2, mode='translate', plot=False):
     target_shape = (max(mask1_cropped.shape[0], mask2_cropped.shape[0]),
                     max(mask1_cropped.shape[1], mask2_cropped.shape[1]))
     
-    if mode == 'translate':
+    if mode == 'translate' or mode == 'rotate':
         mask1_cropped = symmetric_padding(mask1_cropped, target_shape)
         mask2_cropped = symmetric_padding(mask2_cropped, target_shape)
     elif mode == 'translate-scale':
@@ -149,8 +150,32 @@ def automatic_mask(img: np.ndarray,
                    chkpt_path='./assets/sam_vit_b_01ec64.pth',
                    image_format='RGB',
                    mode='translate',
+                   flow=None,
                    iou_weight=0.5,
                    location_weight=0.5):
+
+    assert (mode == "rotate" and flow is not None) or (mode == "translate" and flow is None), \
+        "Flow is required for rotation mode, but not for translation mode"
+        
+    # Apply flow to mask if in rotation mode
+    if mode == "rotate":
+        mask = np.zeros(flow.shape[:2], dtype=np.uint8)
+        
+        # Get the non-zero flow vectors
+        rows_nonzero, cols_nonzero, _ = np.nonzero(flow)
+
+        # Get the target positions for the non-zero flow vectors
+        target_nonzero = np.array([rows_nonzero, cols_nonzero]).T + np.flip(flow[rows_nonzero, cols_nonzero], axis = 1)
+        target_nonzero = target_nonzero.astype(int)
+        
+        # Remove out-of-bounds target positions
+        target_nonzero = target_nonzero[
+            (target_nonzero[:, 0] >= 0) & (target_nonzero[:, 0] < flow.shape[0]) &
+            (target_nonzero[:, 1] >= 0) & (target_nonzero[:, 1] < flow.shape[1])
+        ]
+        
+        mask[target_nonzero[:, 0], target_nonzero[:, 1]] = 1
+        prev_mask = mask
 
     sam = sam_model_registry['vit_b'](checkpoint=chkpt_path)
     sam.to(device='cpu')
@@ -229,10 +254,12 @@ if __name__ == '__main__':
     # This is a little cheaty, since I have assumed with this that the teapot moved 
     # exactly to the target point.
     target_point = np.array([200, 200])
+    mode = 'rotate'
+    flow = get_masked_flow(mask, target_point, mode=mode) if mode == 'rotate' else None
     
     img2 = cv2.imread('./assets/moved.png')
     img2 = cv2.cvtColor(img2, cv2.COLOR_BGR2RGB, img2)
-    mask2 = automatic_mask(img2, mask, target_point, iou_threshold=0.4)
+    mask2 = automatic_mask(img2, mask, target_point, iou_threshold=0.4, mode=mode, flow=flow)
     
     masked_img2 = mask2[..., None]*img2
     masked_img2 = cv2.circle(masked_img2, (int(target_point[0]), int(target_point[1])), 10, (0,255,0), -1)

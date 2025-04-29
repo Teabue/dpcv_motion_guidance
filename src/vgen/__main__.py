@@ -53,6 +53,7 @@ def generate_video(
     src_img_path,
     initial_mask,
     target_points,
+    mode,
     guidance_schedule,
     prompt='',
     guidance_energy_settings=None,
@@ -189,7 +190,12 @@ def generate_video(
         src_img = cv2.imread(str(sample_save_dir / 'pred.png'))
         src_img = cv2.cvtColor(src_img, cv2.COLOR_BGR2RGB)
 
-        prev_mask = automatic_mask(src_img, prev_mask, cur_target)
+        mask_flow = cur_target_flow if mode == "rotate" else None 
+        prev_mask = automatic_mask(src_img, 
+                                   prev_mask, 
+                                   cur_target, 
+                                   mode=mode, 
+                                   flow=mask_flow)
 
 def main():
     import argparse
@@ -216,6 +222,9 @@ def main():
     # General parameters (low priority)
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--quiet', action='store_true')
+    
+    # Extra
+    parser.add_argument('--mode', type=str, choices=['translate', 'rotate'], help='flow mode (translate/rotate)')
 
     args = parser.parse_args()
 
@@ -259,6 +268,8 @@ def main():
     initial_mask = np.load(input_dir / 'initial_mask.npy')
     initial_mask = cv2.dilate(initial_mask.astype('uint8'), np.ones((5, 5), np.uint8), iterations=5).astype(bool)
 
+    mode = args.mode
+    
     # Prepare guidance schedule
     guidance_schedule = np.load(args.guidance_schedule)
 
@@ -281,6 +292,7 @@ def main():
         input_dir,
         initial_mask,
         target_points,
+        mode,
         guidance_schedule,
         prompt=args.prompt,
         guidance_energy_settings=guidance_energy_settings,

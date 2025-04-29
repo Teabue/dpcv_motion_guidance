@@ -27,7 +27,7 @@ def get_edit_mask(flow: np.ndarray, output_shape: list, save_path: Optional[str]
     edit_mask[rows_nonzero, cols_nonzero] = 1
     
     # Get the target positions for the non-zero flow vectors
-    target_nonzero = np.array([rows_nonzero, cols_nonzero]).T + np.flip(flow[rows_nonzero, cols_nonzero])
+    target_nonzero = np.array([rows_nonzero, cols_nonzero]).T + np.flip(flow[rows_nonzero, cols_nonzero], axis = 1)
     target_nonzero = target_nonzero.astype(int)
     
     # Remove out-of-bounds target positions
@@ -54,8 +54,8 @@ if __name__ == "__main__":
     from vgen.flow import get_masked_flow
 
     # Load mask and frame points
-    mask = np.load('mask.npy')
-    frame_points = np.load('frame_points-2025-04-15_19:02:57.npy')
+    mask = np.load('mask_c.npy')
+    frame_points = np.load('frame_points-20250429T161323Z.npy')
     
     for frame in frame_points:
         # Get the flow for the first target point
