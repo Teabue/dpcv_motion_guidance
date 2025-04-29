@@ -129,7 +129,6 @@ def make_scribble_to_frames(scribble: np.ndarray, sam_center: np.ndarray, frames
     # Fit the points to the skeleton
     points = fit_points_to_skeleton(skeleton=mask_skeleton, 
                                     points=spaced_coords)
-    points[0] = sam_center # Make sure the first point is the center of the mask
     
     return points
 
@@ -148,8 +147,8 @@ with gr.Blocks() as demo:
     
     # Images
     image_input = gr.Image(type="numpy", label="Upload an Image", interactive=True, visible=True)
-    image_editing = gr.Paint(label="Draw Mask", type="numpy", interactive=False, layers=False)
-    image_guidance = gr.Image(interactive=False)
+    image_editing = gr.Paint(label="Drawing image", type="numpy", interactive=False, layers=False)
+    image_guidance = gr.Image(label="Estimated motion guidance",interactive=False)
 
     # States
     state_translation_center = gr.State()
@@ -158,12 +157,12 @@ with gr.Blocks() as demo:
     state_motion_option = gr.State(value = "Segment")
     
     # Textboxes
-    text_translation_center = gr.Textbox(placeholder="Click on the image to get the center of the translation", interactive=False)
-    text_number_of_frames = gr.Textbox(placeholder="Number of frames", interactive=False, visible=False)
+    text_translation_center = gr.Textbox(placeholder="Click on the image to get the center of the motion", interactive=False)
+    text_number_of_frames = gr.Textbox(placeholder="Number of frames (click enter to confirm)", interactive=False, visible=False)
     
     # Buttons
     button_make_video = gr.Button("Make Video", visible=True, interactive=False)
-    button_motion_option = gr.Radio(["Segment", "Translate"], label="Motion Guidance", info="Choose among the available motion guidance options", value="Segment", visible=False, interactive=False)
+    button_motion_option = gr.Radio(["Segment", "Translate", "Rotate"], label="Motion Guidance", info="Choose among the available motion guidance options", value="Segment", visible=False, interactive=False)
     
     # --------------------------------------------------------------------
     # --                     Gradio Events                              --
@@ -178,6 +177,7 @@ with gr.Blocks() as demo:
     )
     def on_image_upload(image):
         """Hides the static uploaded image and shows the editable image"""
+        predictor.set_image(image)
         return gr.update(visible=False), image, gr.update(visible=True, interactive = True), gr.update(visible=True)
     
     # Click on image
@@ -194,7 +194,6 @@ with gr.Blocks() as demo:
         clicked_points = evt.index
         
         # Run SAM model
-        predictor.set_image(image)
         input_point = np.array([clicked_points])
         input_label = np.array([1])
         masks, scores, _ = predictor.predict(
@@ -276,44 +275,39 @@ with gr.Blocks() as demo:
                                                sam_center = mask_center, 
                                                frames = frames)
         
+        arrow_color = (0, 255, 0)
+        arrow_width = 5
+        image = image['background']
+        
         if motion_state == "Translate":
-            arrow_color = (0, 255, 0)
-            arrow_width = 5
-            image = image['background']
-            for start_point, end_point in zip(frame_points[:-1], frame_points[1:]):
-                # Draw a line from the start point to the clicked point
-                arrow_color = (0, 255, 0)
-                arrow_width = 5
-                image = cv2.arrowedLine(img = image,
-                                        pt1 = tuple(start_point), 
-                                        pt2 = tuple(end_point),
-                                        color = arrow_color, 
-                                        thickness=arrow_width, 
-                                        )
+            frame_points[0] = mask_center # Make sure the first point is the center of the mask
+        elif motion_state == "Rotate":
+            # Center all points to the mass center
+            cx, cy = mask_center
+            centered_points = frame_points - mask_center
+            centered_points[:, 1] = -centered_points[:, 1]  # Invert the y-axis to account for the top-left origin
             
-            return image, frame_points
-            
-            # # Extract the minimum and maximum coordinates of the mask
-            # y_coords, x_coords = np.where(mask > 0)
-            # coords = np.array([x_coords, y_coords]).T
-            
-            # # See which if the coordinate is closer to the mask center
-            # distances = np.linalg.norm(mask_center - coords, axis=1)
-            # start_point = mask_center
-            # end_point = coords[np.argmax(distances)]
-            
-            # # Draw arrow from the center of the mask to the clicked point
-            # arrow_color = (0, 255, 0)
-            # arrow_width = 5
-            # image = cv2.arrowedLine(img = image['background'],
-            #                         pt1 = tuple(start_point), 
-            #                         pt2 = tuple(end_point),
-            #                         color = arrow_color, 
-            #                         thickness=arrow_width, 
-            #                         )
-            # return image
+            # Compute angles for each point
+            angles = np.arctan2(centered_points[:, 1], centered_points[:, 0])
+            angles = np.unwrap(angles)
+
+            r = 50 # NOTE: This is a hardcoded radius for the rotation
+            frame_points = np.column_stack([cx + r * np.cos(angles),
+                                            cy - r * np.sin(angles)  # Subtract to account for inverted y-axis
+                                            ]).astype(int)
         else:
-            raise NotImplementedError("Only translation is implemented for now.")
+            raise NotImplementedError("Only translation and rotation is implemented for now.")
+        
+        # Draw an arrow from the start point to the clicked point
+        for start_point, end_point in zip(frame_points[:-1], frame_points[1:]):
+            image = cv2.arrowedLine(img = image,
+                                    pt1 = tuple(start_point), 
+                                    pt2 = tuple(end_point),
+                                    color = arrow_color, 
+                                    thickness=arrow_width, 
+                                    )
+            
+        return image, frame_points
     
     # Make the button to save the frame points visible
     @state_frame_points.change(
@@ -351,6 +345,8 @@ with gr.Blocks() as demo:
             return gr.update(interactive=False), evt.value
         elif evt.value == "Translate":
             return gr.update(interactive=True), evt.value
+        elif evt.value == "Rotate":
+            return gr.update(interactive=True), evt.value
         else:
             raise ValueError("When did this happen?")
         
@@ -361,3 +357,4 @@ if __name__ == "__main__":
     parser.add_argument('--bind-wildcard', action='store_true')
     args = parser.parse_args()
     demo.launch(server_name='0.0.0.0' if args.bind_wildcard else None)
+

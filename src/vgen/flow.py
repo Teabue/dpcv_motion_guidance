@@ -15,6 +15,33 @@ def get_translation_flow(cur_pos, target_pos, hw=(512, 512)) -> np.ndarray:
     flow[:,:,:] = target_pos - cur_pos
     return flow
 
+def get_rotation_flow(cur_pos, target_pos, hw=(512, 512)) -> np.ndarray:
+    # Center the points according to the mass center
+    target_pos_c = target_pos - cur_pos
+    
+    # Get the angle of rotation
+    angle = np.arctan2(target_pos_c[1], target_pos_c[0])
+    
+    # Get the rotation matrix
+    rot_m = np.array([[np.cos(angle), -np.sin(angle)],
+                      [np.sin(angle), np.cos(angle)]])
+    
+    # Create a grid of points
+    y, x = np.meshgrid(np.arange(hw[0]), np.arange(hw[1]), indexing='ij')
+    points = np.stack((x, y), axis=-1)
+    
+    # Center the points according to the mass center
+    points = points - cur_pos
+    
+    # Rotate the points
+    points_rotated = rot_m @ points.reshape(-1, 2).T
+    points_rotated = points_rotated.T.reshape(hw[0], hw[1], 2)
+    
+    # Calculate the flow
+    flow = points_rotated - points
+    
+    return flow
+
 
 def get_masked_flow(mask: np.ndarray, 
          target_point: Union[List[int], Tuple[int, int], np.ndarray], 
@@ -38,6 +65,8 @@ def get_masked_flow(mask: np.ndarray,
     
     if mode == 'translate':
         flow = get_translation_flow(cur_pos, target_point, hw=mask.shape)
+    elif mode == 'rotate':
+        flow = get_rotation_flow(cur_pos, target_point, hw=mask.shape)
     else:
         raise NotImplementedError(f"Flow: Mode {mode} not implemented")
     
@@ -52,12 +81,13 @@ if __name__ == '__main__':
     # Example usage, click around to see the flow change
     import cv2
     from motion_guidance.gui.colorwheel import flow_to_image
+    mode = 'rotate'
 
     def mouse_callback(event, x, y, flags, param):
         global target_point, flow, flow_im
         if event == cv2.EVENT_LBUTTONDOWN:
             target_point = (x, y)
-            flow = get_masked_flow(mask, target_point, mode='translate')
+            flow = get_masked_flow(mask, target_point, mode=mode)
             flow_im = flow_to_image(flow, convert_to_bgr=True)
     
     # Circle mask
@@ -67,7 +97,7 @@ if __name__ == '__main__':
 
     # Initial flow
     target_point = (300, 300)
-    flow = get_masked_flow(mask, target_point, mode='translate')
+    flow = get_masked_flow(mask, target_point, mode=mode)
     flow_im = flow_to_image(flow, convert_to_bgr=True)
 
     cv2.namedWindow('Flow')
@@ -79,4 +109,5 @@ if __name__ == '__main__':
             break
 
     cv2.destroyAllWindows()
+
 
