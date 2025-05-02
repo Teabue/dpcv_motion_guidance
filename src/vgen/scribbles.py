@@ -227,7 +227,7 @@ with gr.Blocks() as demo:
     def on_state_translation_center_change(state_translation_center):
         """Update text box with the center of the translation"""
         if state_translation_center is not None:
-            return f"Center of translation: {state_translation_center[0]}, {state_translation_center[1]}"
+            return f"Center of mask: {state_translation_center[0]}, {state_translation_center[1]}"
         else:
             return "Click on the image to get the center of the translation"
     
@@ -270,7 +270,7 @@ with gr.Blocks() as demo:
         # If no scribble is drawn, return the original image
         if scribble.sum() == 0:
             return image['background'], None
-    
+        np.save('scribble.npy', scribble)
         frame_points = make_scribble_to_frames(scribble = scribble, 
                                                sam_center = mask_center, 
                                                frames = frames)
