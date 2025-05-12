@@ -4,7 +4,7 @@ from matplotlib.patches import Patch
 import matplotlib.pyplot as plt
 import skfmm
 from skimage.morphology import skeletonize
-from scipy.ndimage import distance_transform_edt
+from scipy.ndimage import distance_transform_edt, gaussian_filter
 
 def get_sorted_coordinates(masked_distances: np.ndarray) -> np.ndarray:
     """
@@ -123,57 +123,59 @@ def make_scribble_to_frames(scribble: np.ndarray, sam_center: np.ndarray, frames
     
     return points
 
-image = plt.imread("assets/kahlua_512_cut.png")
-scribble = np.load("scribble.npy")
-mask = np.load("mask.npy")
-mask_center = np.array([266, 340])
-frames = 7
+if __name__ == "__main__":
+    image = plt.imread("apple/apple.jpg")
+    scribble = np.load("scribble.npy")
+    mask = np.load("mask.npy")
+    mask_center = np.array([186, 236])
+    frames = 8
 
-distance = get_distances_from_mask_center(scribble, mask_center)
-y_coords, x_coords = np.nonzero(~distance.mask)
+    distance = get_distances_from_mask_center(scribble, mask_center)
+    y_coords, x_coords = np.nonzero(~distance.mask)
 
-# Compute sum of distances and count per bin
-sum_heatmap, _, _ = np.histogram2d(x_coords, y_coords, bins=(100, 100), weights=distance.compressed())
-count_heatmap, xedges, yedges = np.histogram2d(x_coords, y_coords, bins=(100, 100))
+    # Compute sum of distances and count per bin
+    sum_heatmap, _, _ = np.histogram2d(x_coords, y_coords, bins=(100, 30), weights=distance.compressed())
+    count_heatmap, xedges, yedges = np.histogram2d(x_coords, y_coords, bins=(100, 30))
 
-# Avoid division by zero
-average_heatmap = np.divide(sum_heatmap, count_heatmap, out=np.zeros_like(sum_heatmap), where=count_heatmap!=0)
-extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
+    # Avoid division by zero
+    average_heatmap = np.divide(sum_heatmap, count_heatmap, out=np.zeros_like(sum_heatmap), where=count_heatmap!=0)
+    extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
 
-points = make_scribble_to_frames(scribble, mask_center, frames = frames)
-points[0] = mask_center
+    points = make_scribble_to_frames(scribble, mask_center, frames = frames)
+    points[0] = mask_center
 
-# ---- Plotting ----
-# Plot the image
-plt.imshow(image)
+    # ---- Plotting ----
+    # Plot the image
+    plt.imshow(image)
 
-# Plot the heatmap
-# Set black (zero values) to be fully transparent
-average_heatmap_masked = np.ma.masked_where(average_heatmap == 0, average_heatmap)
-plt.imshow(average_heatmap_masked.T, extent=extent, origin='lower', cmap='hot', interpolation='nearest', alpha=0.7)
-plt.colorbar(label='Distance')
-plt.gca().invert_yaxis()
+    # Plot the SAM mask
+    # Overlay the mask on the image with transparency
+    masked_image = np.ma.masked_where(mask == 0, mask)
+    plt.imshow(masked_image, cmap="Accent", alpha=0.5)
 
-# Plot the scribble mask
-plt.plot(mask_center[0], mask_center[1], 'ro', markersize=5, label ='SAM center')
+    # Plot the heatmap
+    # Set black (zero values) to be fully transparent
+    average_heatmap_masked = np.ma.masked_where(average_heatmap == 0, average_heatmap)
+    plt.imshow(average_heatmap_masked.T, extent=extent, origin='lower', cmap='hot', interpolation='nearest', alpha=0.7)
+    plt.colorbar(label='Distance')
+    plt.gca().invert_yaxis()
 
-# Plot the SAM mask
-# Overlay the mask on the image with transparency
-masked_image = np.ma.masked_where(mask == 0, mask)
-plt.imshow(masked_image, cmap="Accent", alpha=0.5)
+    # Plot the scribble mask
+    plt.plot(mask_center[0], mask_center[1], 'ro', markersize=5, label ='SAM center')
 
-# Plot the points fitted points on the image
-x_coords, y_coords = zip(*points)
-plt.scatter(x_coords, y_coords, c="purple", s=10, label = 'Fitted Points')
 
-sam_color = plt.cm.Accent(0)
-legend_patch = Patch(color=sam_color, label='SAM Mask')
-handles, labels = plt.gca().get_legend_handles_labels()
-handles.append(legend_patch)
-labels.append('SAM Mask')
+    # Plot the points fitted points on the image
+    x_coords, y_coords = zip(*points)
+    plt.scatter(x_coords, y_coords, c="purple", s=10, label = 'Fitted Points')
 
-plt.legend(handles=handles, labels=labels, loc ='lower right')
-plt.title('Fitted Points on Scribble')
-plt.axis('off')
-plt.savefig("assets/fitted_points.png", dpi=300, bbox_inches='tight')
-plt.show()
+    sam_color = plt.cm.Accent(0)
+    legend_patch = Patch(color=sam_color, label='SAM Mask')
+    handles, labels = plt.gca().get_legend_handles_labels()
+    handles.append(legend_patch)
+    labels.append('SAM Mask')
+
+    plt.legend(handles=handles, labels=labels, loc ='lower right')
+    plt.title('Fitted Points on Scribble')
+    plt.axis('off')
+    plt.savefig("assets/fitted_points.png", dpi=300, bbox_inches='tight')
+    plt.show()

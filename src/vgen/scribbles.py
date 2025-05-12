@@ -202,6 +202,10 @@ with gr.Blocks() as demo:
             multimask_output=True,
         )
         mask = masks[scores.argmax()]
+        plt.imshow(mask)
+        plt.axis('off')
+        plt.savefig('mask.png', bbox_inches='tight', pad_inches=0)
+        plt.close()
         np.save('mask.npy', mask)
         
         # Overlay mask on image
@@ -215,6 +219,11 @@ with gr.Blocks() as demo:
         # Overlay the mask and draw a circle at the center
         masked_image = cv2.addWeighted(image, 0.7, color_mask, 0.3, 0)
         masked_image = cv2.circle(masked_image, tuple(mask_center), 5, (0, 0, 255), -1)
+        plt.imshow(masked_image)
+        plt.axis('off')
+        plt.savefig('masked_image.png', bbox_inches='tight', pad_inches=0)
+        plt.close()
+        np.save('masked_image.npy', masked_image)
         
         # Update the image, and save the mask center
         return masked_image, masked_image, mask_center, gr.update(interactive=True)
@@ -267,9 +276,23 @@ with gr.Blocks() as demo:
         scribble = cv2.cvtColor(image['layers'][0], cv2.COLOR_RGBA2GRAY)
         scribble[scribble > 0] = 1
         
+        # Save the image overlayed with the scribble
+        overlayed_image = image['background'].copy()
+        scribble_idx = np.argwhere(scribble > 0)
+        overlayed_image[scribble_idx[:, 0], scribble_idx[:, 1]] = image['layers'][0][scribble_idx[:, 0], scribble_idx[:, 1]]
+        plt.imshow(overlayed_image)
+        plt.axis('off')
+        plt.savefig('scribble_overlayed.png', bbox_inches='tight', pad_inches=0)
+        plt.close()
+        np.save('scribble_overlayed.npy', overlayed_image)
+        
         # If no scribble is drawn, return the original image
         if scribble.sum() == 0:
             return image['background'], None
+        plt.imshow(scribble)
+        plt.axis('off')
+        plt.savefig('scribble.png', bbox_inches='tight', pad_inches=0)
+        plt.close()
         np.save('scribble.npy', scribble)
         frame_points = make_scribble_to_frames(scribble = scribble, 
                                                sam_center = mask_center, 
@@ -306,7 +329,12 @@ with gr.Blocks() as demo:
                                     color = arrow_color, 
                                     thickness=arrow_width, 
                                     )
-            
+        plt.imshow(image)
+        plt.axis('off')
+        plt.savefig('estimated_motion_guidance.png', bbox_inches='tight', pad_inches=0)
+        plt.close()
+        np.save("estimated_motion_guidance.npy", image)
+        
         return image, frame_points
     
     # Make the button to save the frame points visible
